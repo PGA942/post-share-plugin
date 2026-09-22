@@ -1,0 +1,10 @@
+schema = "rasq.workspace/1"
+sdk = "0.1.0"
+
+[author]
+namespace = "sample"
+
+[[plugins]]
+name = "post-share-plugin"
+slot = "post.share"
+id = "sample.post-share"
