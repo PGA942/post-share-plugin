@@ -1,19 +1,9 @@
-[package]
-name = "post-share-plugin"
-version = "0.1.0"
-edition = "2021"
-license = "MIT"
-description = "投稿の共有 FOW から呼ばれる文面テンプレート(リンクのみ / 引用 / 作者に言及)→ コンポーザー / コピー / ブラウザ / AsTell"
-
-[lib]
-crate-type = ["cdylib", "rlib"]
-
-[dependencies]
-rasq-plugin-kit = { path = "kit" }
-serde_json = "1"
-
+# rasq CLI が rasq.toml から作り直すファイル(手で直しても rasq new で戻る)。
 [workspace]
-members = ["kit"]
+resolver = "2"
+members = [
+    "plugins/post-share-plugin",
+]
 
 [profile.release]
 opt-level = "s"
