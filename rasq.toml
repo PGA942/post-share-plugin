@@ -8,3 +8,17 @@ namespace = "sample"
 name = "post-share-plugin"
 slot = "post.share"
 id = "sample.post-share"
+
+# 権限の理由(rasq build が配布物の目次 root.safety に入れ、Central が掲載に反映する)。
+# 審査 (rasq-judge) は宣言した権限すべてに理由があるかを見る。無いと自動では承認されない。
+[listing.safety]
+external_hosts = []
+data_handling = "データは端末の中だけで扱い、外部には送信しません。"
+
+[[listing.safety.permissions]]
+permission = "fow.widget"
+reason = "共有テンプレート(リンクのみ / 引用 / 作者に言及)の選択パネルを表示するため"
+
+[[listing.safety.permissions]]
+permission = "storage.safe"
+reason = "最後に選んだテンプレートを覚えておくため"
