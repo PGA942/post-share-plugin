@@ -11,14 +11,17 @@
 //! | AsTell へ | `share.astell` → `astell.share {kind:"text", payload:{text}}` |
 //! | 共有 FOW が閉じた | `post.share.close {token}` → `fow.close` + 状態を捨てる(`panelClosed` も同じ) |
 //!
-//! ビルド: `cargo build --release --target wasm32-unknown-unknown -p post-share-plugin`
-//! 契約: `../CONTRACT.md` §2.8 / §3 / §4。
+//! 確認: `rasq check`(wasm32 ビルド → export → `plugin.manifest` 往復 → スキーマ / 登録簿 → `cargo test`)、
+//! 実 wasm を叩くなら `rasq call post-share-plugin post.share --args @args.json --reply '…'`。
+//! 契約: `../../CONTRACT.md`(正典は rasq-sdk-sample の `docs/slots.md` v0.13)§2.8 / §3 / §4。
 
-use rasq_plugin_kit::{err, fow_spec, host, manifest, rasq_plugin, rrl, serde_json::{json, Value}, unsupported, Surface};
+use rasq_plugin_kit::{err, fow_spec, host, rasq_plugin, rrl, serde_json::{json, Value}, unsupported, Surface};
 use std::sync::Mutex;
 
-const PLUGIN_ID: &str = "sample.post-share";
-const VERSION: &str = "0.1.0";
+/// `plugin.manifest` の答え = `manifest.json`(名前 / 版 / 説明 / 権限はあちらを直す)。
+fn manifest() -> Value {
+    rasq_plugin_kit::serde_json::from_str(include_str!("../manifest.json")).expect("manifest.json")
+}
 
 /// プレビューに出す本文の先頭文字数 / 引用に入れる本文の上限。
 pub const PREVIEW_CHARS: usize = 60;
@@ -250,15 +253,7 @@ fn current_text() -> Option<(String, String)> {
 
 fn handle(fn_name: &str, args: Value) -> Result<Value, Value> {
     match fn_name {
-        "plugin.manifest" => Ok(manifest(
-            PLUGIN_ID,
-            "共有テンプレート(サンプル)",
-            VERSION,
-            "action",
-            "投稿をテンプレート(リンクのみ / 引用 / 作者に言及)で整えてコンポーザー・コピー・AsTell へ",
-            &["post.share"],
-            &["fow.widget", "storage.safe"],
-        )),
+        "plugin.manifest" => Ok(manifest()),
 
         // --- 共有 FOW の行を選んだ -------------------------------------------
         "post.share" => {
@@ -417,6 +412,14 @@ mod tests {
                 collect_taps(ch, out);
             }
         }
+    }
+
+    /// `plugin.manifest` は `manifest.json` そのもの(`rasq check` の往復検査と同じ突き合わせ)。
+    #[test]
+    fn manifest_matches_manifest_json() {
+        let m = call_native("plugin.manifest", json!({})).unwrap();
+        let file: Value = rasq_plugin_kit::serde_json::from_str(include_str!("../manifest.json")).unwrap();
+        assert_eq!(m, file);
     }
 
     #[test]
