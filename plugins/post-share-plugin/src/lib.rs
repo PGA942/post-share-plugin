@@ -8,15 +8,18 @@
 //! | コンポーザーへ | `share.composer` → `composer.open {token, text}` |
 //! | コピー | `share.copy` → `clipboard.set {text}` + `toast` |
 //! | ブラウザで開く | `share.browser` → `url.open {url: link}` |
-//! | AsTell へ | `share.astell` → `astell.share {kind:"text", payload:{text}}` |
+//! | ASTell へ | `share.astell` → `astell.share {kind:"text", payload:{text}}` |
 //! | 共有 FOW が閉じた | `post.share.close {token}` → `fow.close` + 状態を捨てる(`panelClosed` も同じ) |
 //!
 //! 確認: `rasq check`(wasm32 ビルド → export → `plugin.manifest` 往復 → スキーマ / 登録簿 → `cargo test`)、
 //! 実 wasm を叩くなら `rasq call post-share-plugin post.share --args @args.json --reply '…'`。
 //! 契約: `../../CONTRACT.md`(正典は rasq-sdk-sample の `docs/slots.md` v0.13)§2.8 / §3 / §4。
 
-use rasq_plugin_kit::{err, fow_spec, host, rasq_plugin, rrl, serde_json::{json, Value}, unsupported, Surface};
+use rasq_plugin_kit::{err, fow_spec, host, i18n, rasq_plugin, rrl, serde_json::{json, Value}, unsupported, Surface};
 use std::sync::Mutex;
+
+mod text;
+use text::TEXT;
 
 /// `plugin.manifest` の答え = `manifest.json`(名前 / 版 / 説明 / 権限はあちらを直す)。
 fn manifest() -> Value {
@@ -59,12 +62,16 @@ impl Template {
             Template::Mention => "mention",
         }
     }
-    pub fn label(self) -> &'static str {
-        match self {
-            Template::Link => "リンクのみ",
-            Template::Quote => "引用(本文つき)",
-            Template::Mention => "作者に言及",
-        }
+    /// 行の表示名(`loc` の言語)。
+    pub fn label(self, loc: &str) -> &'static str {
+        TEXT.t(
+            loc,
+            match self {
+                Template::Link => "tpl.link.label",
+                Template::Quote => "tpl.quote.label",
+                Template::Mention => "tpl.mention.label",
+            },
+        )
     }
     pub fn from_id(id: &str) -> Option<Template> {
         Template::ALL.iter().copied().find(|t| t.id() == id)
@@ -111,12 +118,16 @@ pub fn full_handle(handle: &str, instance: &str) -> String {
     }
 }
 
-/// テンプレートを適用した文面。
-pub fn template_text(t: Template, input: &ShareInput) -> String {
+/// テンプレートを適用した文面(`loc` の言語で組む。`{link}` を先に差し込むので本文に `{link}` があってもずれない)。
+pub fn template_text(t: Template, input: &ShareInput, loc: &str) -> String {
     match t {
         Template::Link => input.link.clone(),
-        Template::Quote => format!("「{}」\n{}", truncate_chars(input.body.trim(), QUOTE_CHARS), input.link),
-        Template::Mention => format!("{} さんの投稿\n{}", full_handle(&input.handle, &input.instance), input.link),
+        Template::Quote => {
+            TEXT.f(loc, "tpl.quote.text", &[("link", &input.link), ("body", &truncate_chars(input.body.trim(), QUOTE_CHARS))])
+        }
+        Template::Mention => {
+            TEXT.f(loc, "tpl.mention.text", &[("link", &input.link), ("handle", &full_handle(&input.handle, &input.instance))])
+        }
     }
 }
 
@@ -182,43 +193,43 @@ fn section(key: &str, title: &str) -> Value {
 }
 
 /// テンプレート行のタイトル(選択中は先頭にチェック)。
-fn tile_title(t: Template, selected: Template) -> String {
-    format!("{} {}", if t == selected { "✓" } else { "　" }, t.label())
+fn tile_title(t: Template, selected: Template, loc: &str) -> String {
+    format!("{} {}", if t == selected { "✓" } else { "　" }, t.label(loc))
 }
 
-fn template_tile(t: Template, selected: Template) -> Value {
-    rrl::list_tile(&t.node_key(), &tile_title(t, selected), None, Some(&t.fn_name()))
+fn template_tile(t: Template, selected: Template, loc: &str) -> Value {
+    rrl::list_tile(&t.node_key(), &tile_title(t, selected, loc), None, Some(&t.fn_name()))
 }
 
 fn preview_body(input: &ShareInput) -> String {
     truncate_chars(input.body.trim(), PREVIEW_CHARS)
 }
 
-fn panel_root(s: &State) -> Value {
+fn panel_root(s: &State, loc: &str) -> Value {
     let author = if s.input.author.is_empty() { full_handle(&s.input.handle, &s.input.instance) } else { s.input.author.clone() };
     let mut children = vec![
         rrl::styled_text("preview-author", author, 14.0, true, None),
         rrl::styled_text("preview-body", preview_body(&s.input), 12.0, false, Some("#888888")),
     ];
     if !s.account.is_empty() {
-        children.push(rrl::styled_text("account", format!("共有するアカウント: {}", s.account), 11.0, false, Some("#888888")));
+        children.push(rrl::styled_text("account", TEXT.f(loc, "panel.account", &[("account", &s.account)]), 11.0, false, Some("#888888")));
     }
-    children.push(section("sec-template", "テンプレート"));
-    children.extend(Template::ALL.iter().map(|t| template_tile(*t, s.template)));
-    children.push(section("sec-result", "文面"));
-    children.push(rrl::text("result", template_text(s.template, &s.input)));
+    children.push(section("sec-template", TEXT.t(loc, "panel.template")));
+    children.extend(Template::ALL.iter().map(|t| template_tile(*t, s.template, loc)));
+    children.push(section("sec-result", TEXT.t(loc, "panel.result")));
+    children.push(rrl::text("result", template_text(s.template, &s.input, loc)));
     children.push(rrl::row(
         "row-actions",
         vec![
-            rrl::button("btn-composer", "コンポーザーへ", "share.composer"),
-            rrl::button("btn-copy", "コピー", "share.copy"),
+            rrl::button("btn-composer", TEXT.t(loc, "button.composer"), "share.composer"),
+            rrl::button("btn-copy", TEXT.t(loc, "button.copy"), "share.copy"),
         ],
     ));
     children.push(rrl::row(
         "row-actions-2",
         vec![
-            rrl::button("btn-browser", "ブラウザで開く", "share.browser"),
-            rrl::button("btn-astell", "AsTell へ", "share.astell"),
+            rrl::button("btn-browser", TEXT.t(loc, "button.browser"), "share.browser"),
+            rrl::button("btn-astell", TEXT.t(loc, "button.astell"), "share.astell"),
         ],
     ));
     rrl::scroll("root-scroll", false, vec![rrl::column("root", children)])
@@ -226,7 +237,8 @@ fn panel_root(s: &State) -> Value {
 
 /// 本体ツリーは使わない(UI は共有 FOW のインライン FOW だけ)。
 fn root() -> Value {
-    rrl::column("root", vec![rrl::text("hello", "共有テンプレート(UI は共有 FOW の中)")])
+    let loc = i18n::current();
+    rrl::column("root", vec![rrl::text("hello", TEXT.t(&loc, "root.hello"))])
 }
 
 // ---------------------------------------------------------------------------
@@ -247,11 +259,13 @@ fn close_and_drop() {
 }
 
 /// 開いている FOW の文面(`token` と `text`)。閉じていれば `None`。
-fn current_text() -> Option<(String, String)> {
-    with_state(|s| if s.open { Some((s.token.clone(), template_text(s.template, &s.input))) } else { None })
+fn current_text(loc: &str) -> Option<(String, String)> {
+    with_state(|s| if s.open { Some((s.token.clone(), template_text(s.template, &s.input, loc))) } else { None })
 }
 
 fn handle(fn_name: &str, args: Value) -> Result<Value, Value> {
+    let loc = i18n::locale_of(&args).to_string();
+    let loc = loc.as_str();
     match fn_name {
         "plugin.manifest" => Ok(manifest()),
 
@@ -264,9 +278,9 @@ fn handle(fn_name: &str, args: Value) -> Result<Value, Value> {
             let template = load_template();
             let root = with_state(|s| {
                 *s = State { token, input: input_from_args(&args), account: account_label(&args), template, open: false };
-                panel_root(s)
+                panel_root(s, loc)
             });
-            let opened = PANEL.open(fow_spec("共有テンプレート", 0.55), root, Some("panelClosed"), json!({}));
+            let opened = PANEL.open(fow_spec(TEXT.t(loc, "panel.title"), 0.55), root, Some("panelClosed"), json!({}));
             with_state(|s| s.open = opened);
             Ok(json!({}))
         }
@@ -281,9 +295,9 @@ fn handle(fn_name: &str, args: Value) -> Result<Value, Value> {
                 s.template = t;
                 let mut ops: Vec<Value> = Template::ALL
                     .iter()
-                    .map(|x| rrl::set_prop(&x.node_key(), "title", json!(tile_title(*x, t))))
+                    .map(|x| rrl::set_prop(&x.node_key(), "title", json!(tile_title(*x, t, loc))))
                     .collect();
-                ops.push(rrl::set_prop("result", "text", json!(template_text(t, &s.input))));
+                ops.push(rrl::set_prop("result", "text", json!(template_text(t, &s.input, loc))));
                 Some(PANEL.patch(ops))
             });
             let Some(patch) = patch else {
@@ -296,15 +310,15 @@ fn handle(fn_name: &str, args: Value) -> Result<Value, Value> {
 
         // --- 共有先 -------------------------------------------------------------
         "share.composer" => {
-            if let Some((token, text)) = current_text() {
+            if let Some((token, text)) = current_text(loc) {
                 host::composer_open(&token, &text, None, None, None);
             }
             Ok(json!({}))
         }
         "share.copy" => {
-            if let Some((_, text)) = current_text() {
+            if let Some((_, text)) = current_text(loc) {
                 host::clipboard_set(&text);
-                host::toast("文面をコピーしました");
+                host::toast(TEXT.t(loc, "toast.copied"));
             }
             Ok(json!({}))
         }
@@ -316,9 +330,9 @@ fn handle(fn_name: &str, args: Value) -> Result<Value, Value> {
             Ok(json!({}))
         }
         "share.astell" => {
-            if let Some((_, text)) = current_text() {
+            if let Some((_, text)) = current_text(loc) {
                 host::astell_share("text", json!({"text": text}));
-                host::toast("AsTell に共有しました");
+                host::toast(TEXT.t(loc, "toast.astell"));
             }
             Ok(json!({}))
         }
@@ -434,21 +448,21 @@ mod tests {
     #[test]
     fn template_text_shapes() {
         let i = input();
-        assert_eq!(template_text(Template::Link, &i), LINK);
-        assert_eq!(template_text(Template::Quote, &i), format!("「こんにちは」\n{LINK}"));
-        assert_eq!(template_text(Template::Mention, &i), format!("@alice@example.social さんの投稿\n{LINK}"));
+        assert_eq!(template_text(Template::Link, &i, "ja"), LINK);
+        assert_eq!(template_text(Template::Quote, &i, "ja"), format!("「こんにちは」\n{LINK}"));
+        assert_eq!(template_text(Template::Mention, &i, "ja"), format!("@alice@example.social さんの投稿\n{LINK}"));
 
         // 80 文字で切って … を付ける(文字数 = Unicode スカラー値。マルチバイトの途中で切れない)
         let long = "あ".repeat(100);
-        let q = template_text(Template::Quote, &ShareInput { body: long.clone(), ..i.clone() });
+        let q = template_text(Template::Quote, &ShareInput { body: long.clone(), ..i.clone() }, "ja");
         let expected = format!("「{}…」\n{LINK}", "あ".repeat(QUOTE_CHARS));
         assert_eq!(q, expected);
         // ちょうど 80 文字なら切らない
         let exact = "x".repeat(QUOTE_CHARS);
-        let q = template_text(Template::Quote, &ShareInput { body: exact.clone(), ..i.clone() });
+        let q = template_text(Template::Quote, &ShareInput { body: exact.clone(), ..i.clone() }, "ja");
         assert_eq!(q, format!("「{exact}」\n{LINK}"));
         // 前後の空白は落とす
-        let q = template_text(Template::Quote, &ShareInput { body: "  hi \n".into(), ..i.clone() });
+        let q = template_text(Template::Quote, &ShareInput { body: "  hi \n".into(), ..i.clone() }, "ja");
         assert_eq!(q, format!("「hi」\n{LINK}"));
 
         // ハンドルの形: `@alice` / `alice@host` / `@alice@host` はすべて `@alice@host` に
@@ -564,6 +578,65 @@ mod tests {
         take_host_log();
         call_native("share.copy", json!({})).unwrap();
         assert!(take_host_log().is_empty());
+    }
+
+    /// `args.locale` の言語で文を引く(PROTOCOL.md §4.6)。文面のテンプレートも利用者の言語で組む。
+    #[test]
+    fn texts_follow_locale() {
+        let (_g, _store) = setup(Some("mention"));
+        let args = |loc: &str| {
+            json!({
+                "token": "tk1",
+                "post": {"url": LINK, "instance": "example.social", "author": "アリス", "handle": "alice", "body": "{link} hi"},
+                "account": {"instance": "mine.example", "handle": "me"},
+                "link": LINK,
+                "locale": loc
+            })
+        };
+        call_native("post.share", args("en")).unwrap();
+        let open = take_host_log().into_iter().find(|(f, _)| f == "fow.open").unwrap();
+        let tree = &open.1["root"];
+        assert_eq!(open.1["spec"]["title"], "Share templates");
+        assert_eq!(find_node(tree, "account").unwrap()["p"]["text"], "Sharing as: @me@mine.example");
+        assert_eq!(find_node(tree, "tpl-mention").unwrap()["p"]["title"], "✓ Mention the author");
+        assert_eq!(find_node(tree, "result").unwrap()["p"]["text"], format!("Post by @alice@example.social\n{LINK}"));
+        assert_eq!(find_node(tree, "btn-astell").unwrap()["p"]["label"], "Send to ASTell");
+
+        // 選び直し(zh-Hant)の patch と、コピーの toast(ko)
+        call_native("tpl.quote", json!({"locale": "zh-Hant-TW"})).unwrap();
+        let ops = take_patch_message()["ops"].as_array().unwrap().clone();
+        assert!(ops.iter().any(|o| o["target"] == "sample.post-share:main:tpl-quote" && o["value"] == "✓ 引用（含內文）"));
+        // 本文の `{link}` は差し込みに巻き込まれない
+        assert!(ops.iter().any(|o| o["target"] == "sample.post-share:main:result" && o["value"] == json!(format!("「{{link}} hi」\n{LINK}"))));
+        take_host_log();
+        call_native("share.copy", json!({"locale": "ko"})).unwrap();
+        let log = take_host_log();
+        assert_eq!(log.iter().find(|(f, _)| f == "clipboard.set").unwrap().1["text"], json!(format!("“{{link}} hi”\n{LINK}")));
+        assert_eq!(log.iter().find(|(f, _)| f == "toast").unwrap().1["message"], "공유 문구가 복사되었습니다");
+        call_native("share.astell", json!({"locale": "zh-Hans"})).unwrap();
+        let log = take_host_log();
+        assert_eq!(log.iter().find(|(f, _)| f == "toast").unwrap().1["message"], "已分享到 ASTell");
+        call_native("share.astell", json!({})).unwrap();
+        let log = take_host_log();
+        assert_eq!(log.iter().find(|(f, _)| f == "toast").unwrap().1["message"], "ASTell に共有しました");
+
+        // 本体ツリー(args の無い root)は最新の call の言語
+        call_native("lifecycle", json!({"kind": "mount", "locale": "ko"})).unwrap();
+        assert_eq!(find_node(&super::root(), "hello").unwrap()["p"]["text"], "공유 템플릿(UI는 공유 패널 안에 있습니다)");
+        assert!(i18n::take_misses().is_empty());
+    }
+
+    /// マニフェストの `locales`: 4 言語とも名前と説明を持つ。
+    #[test]
+    fn manifest_has_locales() {
+        let m = call_native("plugin.manifest", json!({})).unwrap();
+        let locales = m["locales"].as_object().unwrap();
+        assert_eq!(locales.keys().map(String::as_str).collect::<Vec<_>>(), ["en", "ko", "zh-Hans", "zh-Hant"]);
+        for (tag, l) in locales {
+            assert!(l["name"].as_str().is_some_and(|s| !s.is_empty()), "{tag}");
+            assert!(l["description"].as_str().is_some_and(|s| !s.is_empty()), "{tag}");
+        }
+        assert_eq!(m["locales"]["en"]["name"], "Share templates (sample)");
     }
 
     #[test]
