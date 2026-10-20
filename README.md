@@ -7,7 +7,7 @@
 - テンプレート: 「リンクのみ」(`<link>`)/「引用(本文つき)」(`「<本文 80 文字まで>」\n<link>`)/
   「作者に言及」(`@<handle>@<instance> さんの投稿\n<link>`)。選んだものは `storage.safe` の `template` に覚えて次回も使う
 - 共有先: **コンポーザーへ**(`composer.open {token, text}`)/ **コピー**(`clipboard.set` + `toast`)/
-  **ブラウザで開く**(`url.open {url: link}`)/ **AsTell へ**(`astell.share {kind:"text", payload:{text}}`)
+  **ブラウザで開く**(`url.open {url: link}`)/ **ASTell へ**(`astell.share {kind:"text", payload:{text}}`)
 - 上部に投稿のプレビュー(作者 + 本文 60 文字)、下部に今の文面(`Text`。テンプレートを変えると `setProp` で差し替わる)
 
 ## このリポジトリの形(`rasq` ワークスペース)
@@ -106,7 +106,7 @@ rasq call post-share-plugin tpl.nope                 # → ERROR C01 unsupported
 2. サイドバー → **WASMプラグイン試験 (dev)** → `.wasm のパスからインポート` にそのパス → **読み込み**
 3. **スロットに登録**(権限 `fow.widget` / `storage.safe` を許可)
 4. 投稿のアクションバー右端(共有)→ 共有 FOW の **プラグイン** 節 → 「共有テンプレート(サンプル)」
-5. テンプレートを選び、「コンポーザーへ」で選んだアカウントのコンポーザーに文面が入る(コピー / ブラウザ / AsTell も)
+5. テンプレートを選び、「コンポーザーへ」で選んだアカウントのコンポーザーに文面が入る(コピー / ブラウザ / ASTell も)
 
 ## 掲載(審査)に出す
 
